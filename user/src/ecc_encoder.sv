@@ -37,95 +37,54 @@
 ]}
 */
 
-module ecc_decode #(
-    parameter DW = 64,
-    parameter PW = $clog2(1+DW+$clog2(1+DW))
+module ecc_encode #(
+  parameter DW = 64,
+  parameter PW = $clog2(1+DW+$clog2(1+DW))
 ) (
-    input  [DW + PW : 0] data_i,
 
-    output [DW  - 1 : 0] data_o,
+  input  [DW - 1  : 0] data_i,
 
-    output               sbiterr,
-
-    output               dbiterr
+  output [DW + PW : 0] data_o
 );
 
-logic  parity;
+logic [PW - 1 : 0]      parity;
+logic [DW + PW - 1 : 0] data;
+logic [DW + PW - 1 : 0] codeword;
 
-// Check parity bit. 0 = parity equal, 1 = different parity
-assign parity = data_i[DW+PW] ^ (^data_i[DW+PW-1:0]);
-
-///!    | 0  1  2  3  4  5  6  7  8  9 10 11 12  13  14
-///!    |p1 p2 d1 p4 d2 d3 d4 p8 d5 d6 d7 d8 d9 d10 d11
-///! ---|----------------------------------------------
-///! p1 | x     x     x     x     x     x     x       x
-///! p2 |    x  x        x  x        x  x         x   x
-///! p4 |          x  x  x  x              x  x   x   x
-///! p8 |                      x  x  x  x  x  x   x   x
-
-///! 1. Parity bit 1 covers all bit positions which have the least significant bit
-///!    set: bit 1 (the parity bit itself), 3, 5, 7, 9, etc.
-///! 2. Parity bit 2 covers all bit positions which have the second least
-///!    significant bit set: bit 2 (the parity bit itself), 3, 6, 7, 10, 11, etc.
-///! 3. Parity bit 4 covers all bit positions which have the third least
-///!    significant bit set: bits 4–7, 12–15, 20–23, etc.
-///! 4. Parity bit 8 covers all bit positions which have the fourth least
-///!    significant bit set: bits 8–15, 24–31, 40–47, etc.
-///! 5. In general each parity bit covers all bits where the bitwise AND of the
-///!    parity position and the bit position is non-zero.
-
-
-logic [PW      - 1 : 0] syndrome;
-logic                   syndrome_not_zero;
-
-logic [DW + PW - 1 : 0] correct_data;
-logic [DW      - 1 : 0] data_wo_parity;
-
-assign                  syndrome_not_zero = |syndrome;
-
-always_comb begin : calculate_syndrome
-  syndrome = 0;
-  for (int unsigned i = 0; i < PW; i++) begin
-    for (int unsigned j = 0; j < DW + PW; j++) begin
-      if (|(unsigned'(2**i) & (j + 1))) 
-        syndrome[i] = syndrome[i] ^ data_i[j];
-    end
-  end
-end
-
-// correct the data word if the syndrome is non-zero
-always_comb begin
-  correct_data = data_i[DW + PW - 1 : 0];
-  if (syndrome_not_zero) begin
-    correct_data[syndrome - 1] = ~data_i[syndrome - 1];
-  end
-end
-
-///! Syndrome | Overall Parity (MSB) | Error Type   | Notes
-  ///! --------------------------------------------------------
-  ///! 0        | 0                    | No Error     |
-  ///! /=0      | 1                    | Single Error | Correctable. Syndrome holds incorrect bit position.
-  ///! 0        | 1                    | Parity Error | Overall parity, MSB is in error and can be corrected.
-  ///! /=0      | 0                    | Double Error | Not correctable.
-
-assign sbiterr = parity  & syndrome_not_zero;
-assign dbiterr = ~parity & syndrome_not_zero;
-
-// Extract data vector
-always_comb begin
-  automatic int unsigned idx; // bit index
-  data_wo_parity = '0;
-  idx = 0;
-
+// Expand incoming data to codeword width
+always_comb begin : expand_data
+  automatic int unsigned idx;
+  data = 0;
+  idx  = 0;
   for (int unsigned i = 1; i < DW + PW + 1; i++) begin
-  // if i is a power of two we are indexing a parity bit
+    // if it is not a power of two word it is a normal data index
     if (unsigned'(2**$clog2(i)) != i) begin
-      data_wo_parity[idx] = correct_data[i - 1];
+      data[i - 1] = data_i[idx];
       idx++;
     end
   end
 end
 
-assign data_o = data_wo_parity;
+// calculate code word
+always_comb begin : calculate_syndrome
+  parity = 0;
+  for (int unsigned i = 0; i < PW; i++) begin
+    for (int unsigned j = 1; j < DW + PW + 1; j++) begin
+      if (|(unsigned'(2**i) & j))
+        parity[i] = parity[i] ^ data[j - 1];
+    end
+  end
+end
 
-endmodule  //ecc_decode
+// fuse the final codeword
+always_comb begin : generate_codeword
+  codeword = data;
+  for (int unsigned i = 0; i < PW; i++) begin
+    codeword[2**i-1] = parity[i];
+  end
+end
+
+assign data_o[DW+PW-1:0] = codeword;
+assign data_o[DW+PW]   = ^codeword;
+
+endmodule
