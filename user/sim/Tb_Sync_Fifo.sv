@@ -259,7 +259,7 @@ u_sync_fifo(
 	.rd_data_count 	( rd_data_count    ),
 	.rd_data_space 	( rd_data_space    ),
 	.almost_full   	( fifo_almost_full ),
-	.almost_empty  	( fifo_almost_empty),
+	.almost_empty  	( ),
 	.prog_full     	( prog_full        ),
 	.prog_empty    	( prog_empty       ),
 	.overflow      	( overflow         ),
